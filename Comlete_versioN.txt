@@ -64,6 +64,7 @@
  *  for by the Civil Code of the Russian Federation, in particular, Articles 12, 1250-1253 and 1301.
  *----------------------------------------------------------------------------------------------------------------------------------------------------------------
  * Author: Lyakishev Alexey Valerievich                   Data: 12.12.2020					Email: lyakishev_i_vah@mail.ru
+ * Source: https://github.com/AlboDen/CooleteWorkSTM32_stage1 
 /*****************************************************************************************************************************************************************/
 
 #include "stm32f30x_gpio.h"
@@ -220,7 +221,7 @@
 
 			RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOE, ENABLE);
 			RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
-		//-/description of the leading and complementary inference PWM (ÐÅ9 è ÐÅ8)/-//
+		//-/description of the leading and complementary inference PWM (ÃÃ…9 Ã¨ ÃÃ…8)/-//
 			GPIOE -> MODER &= ~0xffff;
 			GPIOE -> OTYPER &= ~0xffff;
 			GPIOE -> OSPEEDR &= ~0xffff;
@@ -270,7 +271,7 @@
 			GPIOA -> MODER |= (0b10 << 2*9);
 
 
-		//-/ Description of specific AF functions for ÐÅ12-ÐÅ8 //-/
+		//-/ Description of specific AF functions for ÃÃ…12-ÃÃ…8 //-/
 			GPIOE -> AFR[1] |= (0b10 << 4*6);
 			GPIOE -> AFR[1] |= (0b10 << 4*5);
 			GPIOE -> AFR[1] |= (0b10 << 4*4);
@@ -303,7 +304,7 @@
 		{
 		//TIM1 clock ON//
 
-			RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE); //òàêòèðîâàíèå ÒÑ TIM1 (ïðîäâèíóòûé)
+			RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE); //Ã²Ã ÃªÃ²Ã¨Ã°Ã®Ã¢Ã Ã­Ã¨Ã¥ Ã’Ã‘ TIM1 (Ã¯Ã°Ã®Ã¤Ã¢Ã¨Ã­Ã³Ã²Ã»Ã©)
 
 		///description TIM1///
 
@@ -379,9 +380,9 @@
 		//SPI configuration
 		void SPI_INIT()
 {
-	 RCC -> APB2ENR |= RCC_APB2ENR_SPI1EN;	//ìû àêòèâèðîâàëè
+	 RCC -> APB2ENR |= RCC_APB2ENR_SPI1EN;	//Ã¬Ã» Ã ÃªÃ²Ã¨Ã¢Ã¨Ã°Ã®Ã¢Ã Ã«Ã¨
 
-	 SPI1 -> CR1 |= (uint16_t)(1 << 1);		//-----ÑLK in 1 while waiting
+	 SPI1 -> CR1 |= (uint16_t)(1 << 1);		//-----Ã‘LK in 1 while waiting
 	 SPI1 -> CR1 |= (uint16_t)(1 << 0);		//second transition of the clock signal = capture of information
 	 SPI1 -> CR1 |= (uint16_t)(0b000 << 3); //dividing the system bus frequency by 8 CR1: BR
 	 SPI1 -> CR1 |= (uint16_t)(1 << 9);		//software control SSN enabled CR1: SSM
@@ -411,7 +412,7 @@
 
 			spixbase = (uint32_t)SPI1;
 			spixbase += 0x0C;
-			*(uint8_t *) spixbase = byteToSend;//ßâíîå ïåðåîïðåäåëåíèå òèïà óêàçàòåëÿ
+			*(uint8_t *) spixbase = byteToSend;//ÃŸÃ¢Ã­Ã®Ã¥ Ã¯Ã¥Ã°Ã¥Ã®Ã¯Ã°Ã¥Ã¤Ã¥Ã«Ã¥Ã­Ã¨Ã¥ Ã²Ã¨Ã¯Ã  Ã³ÃªÃ Ã§Ã Ã²Ã¥Ã«Ã¿
 
 			while ( ((SPI1 -> SR) & (1 << 0)) == RESET){}
 
@@ -456,12 +457,12 @@
 		//for 2 blink-delay
 		void main_mezo_wait_settens()
 				{
-				//Blink ¹1
+				//Blink Â¹1
 				_delay(500);
 				GPIOE -> ODR |= (1 << 15);
 				_delay(500);
 				GPIOE -> ODR &= ~(1 << 15);
-				//Blink ¹2
+				//Blink Â¹2
 				_delay(500);
 				GPIOE -> ODR |= (1 << 15);
 				_delay(500);
@@ -568,7 +569,7 @@
 
 			resultOUT_ADC = readADC(ADC_Channel_1);
 
-			if((resultOUT_ADC>1997) && (resultOUT_ADC<2097)) //get ADC output value in the range 2047±50 (half of 4095)
+			if((resultOUT_ADC>1997) && (resultOUT_ADC<2097)) //get ADC output value in the range 2047Â±50 (half of 4095)
 				{
 					return ;
 				}
@@ -585,17 +586,17 @@
 		//Blink of PE15 for complete settens
 		void main_post_wait_settens()
 		{
-		//Blink ¹1
+		//Blink Â¹1
 		_delay(500);
 		GPIOE -> ODR |= (1 << 15);
 		_delay(500);
 		GPIOE -> ODR &= ~(1 << 15);
-		//Blink ¹2
+		//Blink Â¹2
 		_delay(500);
 		GPIOE -> ODR |= (1 << 15);
 		_delay(500);
 		GPIOE -> ODR &= ~(1 << 15);
-		//Blink ¹3
+		//Blink Â¹3
 		_delay(500);
 		GPIOE -> ODR |= (1 << 15);
 		_delay(500);
@@ -628,11 +629,11 @@
 
 //DATA PROCESSING AND PREPARATION FOR OUTPUT
 
-	//-/BEGIN comeback from Set¹2/-//
+	//-/BEGIN comeback from SetÂ¹2/-//
 
-	//-/BEGIN comeback from Set¹3/-//
+	//-/BEGIN comeback from SetÂ¹3/-//
 	if(OUT_MODE == PWM) AXIS = Y; //if OUT_MODE set as PWM, we need value from two axis, which means
-	//-/END comeback from Set¹3/-//
+	//-/END comeback from SetÂ¹3/-//
 
 	if(AXIS == Y)
 	{
@@ -646,16 +647,16 @@
 					}
 					if (yResult < 0x20){yResult = 0;}
 
-				//-/BEGIN comeback from Set¹1/-//
+				//-/BEGIN comeback from SetÂ¹1/-//
 					yResult = yResult * PrescalerFROM1settens;
-				//-/END comeback from Set¹1/-//
+				//-/END comeback from SetÂ¹1/-//
 
 					if (ySign == 0){yPosition += 0.07 * yResult * 0.025;}//~    0  ... 150
 					else{yPosition -= 0.07 * yResult * 0.025;}			 //~  -150 ...  0
 
 					if(OUT_MODE == DIGITAL)
 					{
-					if(yPosition<-150)yPosition=-150;//îãðàíè÷èâàåì äèàïàçîí.
+					if(yPosition<-150)yPosition=-150;//Ã®Ã£Ã°Ã Ã­Ã¨Ã·Ã¨Ã¢Ã Ã¥Ã¬ Ã¤Ã¨Ã Ã¯Ã Ã§Ã®Ã­.
 					if(yPosition>150)yPosition=150;
 
 
@@ -675,9 +676,9 @@
 					}
 	}
 
-	//-/BEGIN comeback from Set¹3/-//
+	//-/BEGIN comeback from SetÂ¹3/-//
 	if(OUT_MODE == PWM) AXIS = X; //if OUT_MODE set as PWM, we need value from two axis, which means
-	//-/END comeback from Set¹3/-//
+	//-/END comeback from SetÂ¹3/-//
 
 	if(AXIS == X)
 	{
@@ -692,9 +693,9 @@
 				}
 				if (xResult < 0x20){xResult = 0;}
 
-			//-/BEGIN comeback from Set¹1/-//
+			//-/BEGIN comeback from SetÂ¹1/-//
 				xResult = xResult * PrescalerFROM1settens;
-			//-/END comeback from Set¹1/-//
+			//-/END comeback from SetÂ¹1/-//
 
 				if (xSign == 0){xPosition += 0.07 * xResult * 0.025;}//~    0  ... 150
 				else{xPosition -= 0.07 * xResult * 0.025;}			 //~  -150 ...  0
@@ -720,7 +721,7 @@
 				result_from_HIR_x = Set0inACTfromADC + ((xPosition)*27);
 				}
 	}
-	//-/END comeback from Set¹2/-//
+	//-/END comeback from SetÂ¹2/-//
 
 
 
@@ -736,8 +737,8 @@ if(OUT_MODE == DIGITAL)
 							{
 							int result_from_0_to_500 =  result_from_HIR*2;
 
-							TIM1 -> CCER |= (1<<0); //ON ÐÅ9
-							TIM1 -> CCER |= (1<<2); //ON ÐÅ8
+							TIM1 -> CCER |= (1<<0); //ON ÃÃ…9
+							TIM1 -> CCER |= (1<<2); //ON ÃÃ…8
 
 							TIM1 -> CCR1 = result_from_0_to_500; //upload the processed value from the ADC to the shim register
 							}
@@ -748,8 +749,8 @@ if(OUT_MODE == DIGITAL)
 								{
 								int result_from_500_to_1000_for_CCR1 = (1000 - result_from_HIR)*2;
 
-								TIM1 -> CCER |= (1<<0); //ON ÐÅ9
-								TIM1 -> CCER |= (1<<6); //ON ÐÅ10
+								TIM1 -> CCER |= (1<<0); //ON ÃÃ…9
+								TIM1 -> CCER |= (1<<6); //ON ÃÃ…10
 
 								TIM1 -> CCR1 = result_from_500_to_1000_for_CCR1; //upload the processed value from the ADC to the shim register
 								TIM1 -> CCR2 = (result_from_HIR - 500)*2; //
@@ -763,8 +764,8 @@ if(OUT_MODE == DIGITAL)
 									//since the channel we are switching to is direct, we need an inverter. value, cat. lights it up
 									//so that it starts to glow when passing to this interval, and not go out
 									int result2_invert_from_1000_to_1500_for_CCR2 = 1000 - result_from_1000_to_1500_for_CCR2;
-									TIM1 -> CCER |= (1<<6); //ON ÐÅ10
-									TIM1 -> CCER |= (1<<4); //ON ÐÅ11
+									TIM1 -> CCER |= (1<<6); //ON ÃÃ…10
+									TIM1 -> CCER |= (1<<4); //ON ÃÃ…11
 
 									TIM1 -> CCR2 = result_from_1000_to_1500_for_CCR2; //upload the processed value from the ADC to the shim register
 
@@ -776,9 +777,9 @@ if(OUT_MODE == DIGITAL)
 										{
 										int result_from_1500_to_2044_for_CCR2 = (2044 - result_from_HIR)*2;
 										int result_from_1500_to_2044_for_CCR3 = 1000 - result_from_1500_to_2044_for_CCR2;
-										if (result_from_1500_to_2044_for_CCR3 < 20) result_from_1500_to_2044_for_CCR3=0;//äëÿ ïîâûøåíèÿ ñòàáèëüíîñòè
-										TIM1 -> CCER |= (1<<4); //ON ÐÅ11
-										TIM1 -> CCER |= (1<<10); //ON ÐÅ12
+										if (result_from_1500_to_2044_for_CCR3 < 20) result_from_1500_to_2044_for_CCR3=0;//Ã¤Ã«Ã¿ Ã¯Ã®Ã¢Ã»Ã¸Ã¥Ã­Ã¨Ã¿ Ã±Ã²Ã Ã¡Ã¨Ã«Ã¼Ã­Ã®Ã±Ã²Ã¨
+										TIM1 -> CCER |= (1<<4); //ON ÃÃ…11
+										TIM1 -> CCER |= (1<<10); //ON ÃÃ…12
 
 										TIM1 -> CCR2 = result_from_1500_to_2044_for_CCR2; //upload the processed value from the ADC to the shim register
 										TIM1 -> CCR3 = result_from_1500_to_2044_for_CCR3;
@@ -792,8 +793,8 @@ if(OUT_MODE == DIGITAL)
 												//since the channel we are switching to is direct, we need an inverter. value, cat. lights it up
 												//so that it starts to glow when passing to this interval, and not go out
 
-												TIM1 -> CCER |= (1<<10); //ON ÐÅ12
-												TIM1 -> CCER |= (1<<8); //ON ÐÅ13
+												TIM1 -> CCER |= (1<<10); //ON ÃÃ…12
+												TIM1 -> CCER |= (1<<8); //ON ÃÃ…13
 
 												TIM1 -> CCR3 = result_from_2000_to_2555_for_CCR3; //upload the processed value from the ADC to the shim register
 												}
@@ -805,8 +806,8 @@ if(OUT_MODE == DIGITAL)
 														int result_from_1500_to_2044_for_CCR3 = (3066 - result_from_HIR)*2;
 														int result_from_1500_to_2044_for_CCR4 = 1000 - result_from_1500_to_2044_for_CCR3;
 														if (result_from_1500_to_2044_for_CCR4 < 20) result_from_1500_to_2044_for_CCR4=0;//to improve stability
-														TIM1 -> CCER |= (1<<8); //ON ÐÅ13
-														TIM1 -> CCER |= (1<<12); //ON ÐÅ14
+														TIM1 -> CCER |= (1<<8); //ON ÃÃ…13
+														TIM1 -> CCER |= (1<<12); //ON ÃÃ…14
 
 														TIM1 -> CCR3 = result_from_1500_to_2044_for_CCR3; //upload the processed value from the ADC to the shim register
 														TIM1 -> CCR4 = result_from_1500_to_2044_for_CCR4;
@@ -818,8 +819,8 @@ if(OUT_MODE == DIGITAL)
 																			int result_from_1500_to_2044_for_CCR4 = (4095 - result_from_HIR)*2;
 																			int result_from_1500_to_2044_for_CCR1 = 1000-result_from_1500_to_2044_for_CCR4;
 																			if (result_from_1500_to_2044_for_CCR1 < 20) result_from_1500_to_2044_for_CCR1=0;//to improve stability
-																			TIM1 -> CCER |= (1<<12); //ON ÐÅ14
-																			TIM1 -> CCER |= (1<<2); //ON ÐÅ8
+																			TIM1 -> CCER |= (1<<12); //ON ÃÃ…14
+																			TIM1 -> CCER |= (1<<2); //ON ÃÃ…8
 
 																			 //upload the processed value from the ADC to the shim register
 																			TIM1 -> CCR4 = result_from_1500_to_2044_for_CCR4;
@@ -874,20 +875,20 @@ if(OUT_MODE == DIGITAL)
 
 		if ((result_from_HIR_x > 2050) && (result_from_HIR_x < 6000))
 		{
-			TIM1 -> CCER |= (1<<0); //ON ÐÅ9
+			TIM1 -> CCER |= (1<<0); //ON ÃÃ…9
 			TIM1 -> CCR1 = (result_from_HIR_x - 2047)/2;
 		}
 		if ((result_from_HIR_x >= 2000) && (result_from_HIR_x <= 2050)){}
 		if ((result_from_HIR_x >= 0) && (result_from_HIR_x < 2000))
 		{
-			TIM1 -> CCER |= (1<<8); //ON ÐÅ13
+			TIM1 -> CCER |= (1<<8); //ON ÃÃ…13
 			TIM1 -> CCR3 = (-1)*((result_from_HIR_x-2047)/2);
 		}
 
 		//preparating Y-value
 		if ((result_from_HIR_y > 2047) && (result_from_HIR_y < 4095))
 		{
-			TIM1 -> CCER |= (1<<4); //ON ÐÅ11
+			TIM1 -> CCER |= (1<<4); //ON ÃÃ…11
 			TIM1 -> CCR2 = (result_from_HIR_y - 2047)/2;
 		}
 	}
