@@ -1,0 +1,995 @@
+/*****************************************************************************************************************************************************************/
+ /* Manual for setting up and using the L3GD20 gyroscope control program using the STM32F303VC microcontroller
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ *	FEATURES
+ * 	This program is intended for preset sensitivity and axis selection.
+ * 	And also to actively adjust the gyroscope value.
+ *
+ *	The main sequence of performing the configuration steps and entering the active mode:
+ * 	1) ON SysTIM for organization delay
+ * 	2) Change of sensitivity for output result. This parameter can be one of the 5 values:
+ * 				@arg 0: gyroscope result as 0; gyroscope are sleep
+ * 				@arg 1-4: gyroscope result as x1 x2 x3 or x4; gyroscope are active 																				@SENS
+ * 	3) Sensitivity one of the following output mode:
+ * 				This parameter can be one of the following values:
+ *	     		@arg DIGITAL: information writes as sequence of LEDs. In this mode give write about one of the axis, which are described in the 4 point 		@DIGITAL_MODE
+ *  	   		@arg PWM (Pulse width modulation):  information writes as gradation of opposing complementary LEDs (for example, PE9-PE13).						@PWM_MODE
+ *  	   											In this mode give write about two of the axis in one moment
+ * 4) [if was set DIGITAL MODE]	In this mode user can change one of the following Axis:																			@AXIS_MODE
+ * 				@arg Y:	In this mode give write about one of the Y - axis of gyroscope
+ * 				@arg X: In this mode give write about one of the X - axis of gyroscope
+ *
+ * Cycle operation in Sensitivity unit
+ * 				Each sensitivity`s accompanied by two cycle operation:
+ * 				1) Wait for fast ready of human operator (2 blink). This operations give time to user for complete other cases and time for ready				@TWO_BLINK
+ * 																	Also this operations separate one of many others operations. For example, two sensitivity mode,
+ * 																	of sensitivity mode and next operation
+ * 				2) Potentiometer in ready state. This operations do two functions. First - this operations give write about potentiometer slider angle,
+ * 																	and its drive by user to the ready state (this is second functions). Second functions allows
+ * 																	give to ADC1 medium values in range from 0 to 4095 for comfort next work					@READY_STATE
+ *
+ * Complete unit - is main sensitivity block, which set need unit of CPU for correct work. Last set-functions you can search on reference @main_set
+ *																																								
+ * Main cycle this program is located on reference @main_cycle
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ *HARDWARE EQUIPMENT
+ *To control the logic circuit of this device you will need:
+ *	 	- connect the potentiometer with the extreme terminals of the resistive winding to the + 3v bus, and controlled to PA0.
+ *		- connect a tactical membrane normally open button between the power shield and the PE0 terminals.
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * WARNING
+ *Perhaps the user will need to adjust the stabilization parameters for his unique gyroscope. The parameters that need to be picked up are on the links:
+ * 			@PWM_OUT_MODE_X-axis		@PWM_OUT_MODE_Y-axis		@DIGTAL_OUT_MODE_Y-axis 		@DIGTAL_OUT_MODE_X-axis
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * PROGRAM SETTING
+ * The common setting for the three primary parameters is logically separated by alternating the double blinking of the LED (ref. @TWO_BLINK) 
+ * and the function of driving the potentiometer to the initial state (ref. @READY_STATE). 
+ * After the very first two flashes of the signal LED (located on pin 15 of port A), a transition to the sensitivity setting occurs. 
+ * In this setting, turn the potentiometer knob to select one of 5 sensitivity modes (ref. @SENS). 
+ * In the future, this setting will affect the sensitivity of changing the state of the display LEDs to changes in the angle of rotation of the gyroscope. 
+ * The following will list the LEDs that correspond to a specific sensitive mode. 
+ * PE8 - zero sensitivity mode; PE9 - normal sensitivity mode; PE10-PE12 - modes of one, two and threefold increase in sensitivity.
+ * After pressing the tact button PA1, 2 preparatory functions will be called again. In the following, this event will be referred to as PSEV (preparation setting event).
+ * Then processing of the second set will begin. In it, by turning the potentiometer knob, there is a choice between PE8 
+ * (DIGITAL_MODE (ref. @DIGITAL_MODE)) and PE9 (PWM_MODE (ref. @PWM_MODE)).
+ * PSEV.
+ * If DIGITAL_MODE is selected, the user is offered to select the active axis with which further dialogue will be conducted. PE8 - oX, PE9 - oY (ref. @AXIS_MODE).
+ * PSEV.
+ * Then the LED will blink three times as a sign of the end of the settings, and the microcontroller will start working according to the previously specified settings.
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * INTELLECTUAL PROPERTY
+ * The intellectual property in this project belongs to the author. Any copying (except for the use of this program for educational and entertainment non-commercial purposes) 
+ * of this material not agreed with the author without specifying the source may lead to criminal liability under the 
+ * Criminal Code of the Russian Federation Article 147, paragraph 1 or civil liability for copyright infringement provided
+ *  for by the Civil Code of the Russian Federation, in particular, Articles 12, 1250-1253 and 1301.
+ *----------------------------------------------------------------------------------------------------------------------------------------------------------------
+ * Author: Lyakishev Alexey Valerievich                   Data: 12.12.2020					Email: lyakishev_i_vah@mail.ru
+/*****************************************************************************************************************************************************************/
+
+#include "stm32f30x_gpio.h"
+#include "stm32f30x_rcc.h"
+#include "stm32f30x_adc.h"
+#include "stm32f30x_tim.h"
+#include "stm32f30x_misc.h"
+#include "stm32f30x_spi.h"
+
+
+//global values
+		//for delay count
+		volatile uint32_t count;
+
+		//for 1 settens (sensitivity)
+		uint16_t PrescalerFROM1settens;
+
+		//for 2 settens (axis)
+		uint8_t AXIS;
+		const uint8_t Y = 1; 	//Y flag
+		const uint8_t X = 0;	//X flag
+		const uint8_t NONE_AXIS_FLAG = 2;
+
+		//for 3 settens
+		uint8_t OUT_MODE;
+		const uint8_t PWM = 1;
+		uint8_t const DIGITAL = 0;
+
+		//for ADC result
+		uint16_t resultADC;
+
+		//for SPI 1
+		uint8_t sendData;
+		uint8_t receiveData_x[2];
+		uint8_t receiveData[2];
+		uint8_t receiveData_y[2];
+		uint8_t tempByte;
+
+		//the trim variable for zero during in the active mode in DIGITAL OUT_MODE
+		uint16_t Set0inACTfromADC;
+
+		//navigation of gyroscope
+		double xPosition; 			//value for navigation of gyroscope on oX-axis
+		double yPosition;			//value for navigation of gyroscope on oY-axis
+		uint16_t xResult;			//value for first-give value from gyroscope on oX-axis
+		uint16_t yResult;			//value for first-give value from gyroscope on oY-axis
+		uint8_t xSign;				//sign flag of moment velosity of gyroscope oX-axis
+		uint8_t ySign;				//sign flag of moment velosity of gyroscope oY-axis
+
+		//value write for different output mode
+					int result_from_HIR = 0; 	//for for the calibrated value of the gyroscope position in DIGITAL OUT_MODE
+
+					int result_from_HIR_x = 0;	//for for the calibrated value of the gyroscope position in PWM OUT_MODE for 2-axis
+					int result_from_HIR_y = 0;
+
+					uint8_t PWM_Set0Flag = 0; 		//which of the axes will be adjusted by the potentiometer. Default this param. = X
+					uint16_t PWM_Set0Flag_count = 0;//count of switch torch
+					uint16_t Set0_ofX_inACT_PWMmode_fromADC;
+					uint16_t Set0_ofY_inACT_PWMmode_fromADC;
+
+
+
+
+//COMMANDS
+
+//configuration block for settens
+		//set the pins of PEx for digital output information about sensitivity change
+		void GPIO_SET1_INIT()
+		{
+			RCC -> AHBENR |= RCC_AHBENR_GPIOEEN;
+			RCC -> AHBENR |= RCC_AHBENR_GPIOAEN;
+
+			GPIOA -> MODER |= (0b00 << 2*1);
+			GPIOA -> OTYPER |= (0b0 << 1*1);
+			GPIOA -> OSPEEDR |= (0b10 << 2*1);
+			GPIOA -> PUPDR |= (0b10 << 2*1);
+
+			for(int i = 8; i<=13; i++)
+			{
+				GPIOE -> MODER |= (0b01 << 2*i);
+				GPIOE -> OTYPER |= (0b0 << 1*i);
+				GPIOE -> OSPEEDR |= (0b10 << 2*i);
+				GPIOE -> PUPDR |= (0b00 << 2*i);
+
+			}
+		}
+		//clear bitmap of PEx after GPIO_SET1_INIT()
+		void GPIO_RESET1_INIT()
+		{
+			for(int i = 8; i<=13; i++)
+				{
+				GPIOE -> MODER &= ~(0b11 << 2*i);
+				GPIOE -> OTYPER &= ~(0b1 << 1*i);
+				GPIOE -> OSPEEDR &= ~(0b11 << 2*i);
+				GPIOE -> PUPDR &= ~(0b11 << 2*i);
+				}
+			RCC -> AHBENR &= ~0x00200000; //OFF GPIOE
+			RCC -> AHBENR &= ~0x00020000; //OFF GPIOA
+		}
+		//set the pins of PEx for digital output information about axis change
+		void GPIO_SET2_INIT()
+		{
+			RCC -> AHBENR |= RCC_AHBENR_GPIOEEN;
+			RCC -> AHBENR |= RCC_AHBENR_GPIOAEN;
+
+			for(int i = 8; i<=9; i++)
+			{
+				GPIOE -> MODER |= (0b01 << 2*i);
+				GPIOE -> OTYPER |= (0b0 << 1*i);
+				GPIOE -> OSPEEDR |= (0b10 << 2*i);
+				GPIOE -> PUPDR |= (0b00 << 2*i);
+
+			}
+		}
+		//clear bitmap of PEx after GPIO_SET2_INIT()
+		void  GPIO_RESET2_INIT()
+		{
+			for(int i = 8; i<=9; i++)
+				{
+				GPIOE -> MODER &= ~(0b11 << 2*i);
+				GPIOE -> OTYPER &= ~(0b1 << 1*i);
+				GPIOE -> OSPEEDR &= ~(0b11 << 2*i);
+				GPIOE -> PUPDR &= ~(0b11 << 2*i);
+				}
+			RCC -> AHBENR &= ~0x00200000; //OFF GPIOE
+			RCC -> AHBENR &= ~0x00020000; //OFF GPIOA
+		}
+		//set the pins of PEx for digital write pause
+		void GPIO_post_wait_settens()
+		{
+			RCC -> AHBENR |= RCC_AHBENR_GPIOEEN;
+
+			GPIOE -> MODER |= (0b01 << 2*15);
+			GPIOE -> OTYPER|= (0b00 << 1*15);
+			GPIOE -> OSPEEDR |= (0b00 << 2*15);
+			GPIOE -> PUPDR |= (0b00 << 2*15);
+		}
+		//clear bitmap of PEx after GPIO_post_wait_settens()
+		void GPIO_reset_post_wait_settens()
+{
+	GPIOE -> MODER &= ~(0b11 << 2*15);
+	GPIOE -> OTYPER &= ~(0b1 << 1*15);
+	GPIOE -> OSPEEDR &= ~(0b11 << 2*15);
+	GPIOE -> PUPDR &= ~(0b11 << 2*15);
+
+	RCC -> AHBENR |= ~0x00200000;//OFF GPIOE
+}
+
+
+//block of main basic installations
+		//GPIO configuration
+		void GPIO_init()
+		{
+
+			RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOE, ENABLE);
+			RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+		//-/description of the leading and complementary inference PWM (РЕ9 и РЕ8)/-//
+			GPIOE -> MODER &= ~0xffff;
+			GPIOE -> OTYPER &= ~0xffff;
+			GPIOE -> OSPEEDR &= ~0xffff;
+			GPIOE -> PUPDR  &= ~0xffff;
+
+			GPIOE -> MODER |= (0b10 << 2*9);
+			GPIOE -> OTYPER|= (0b00 << 1*9);
+			GPIOE -> OSPEEDR |= (0b00 << 2*9);
+			GPIOE -> PUPDR |= (0b00 << 2*9);
+
+			GPIOE -> MODER |= (0b10 << 2*8);
+			GPIOE -> OTYPER|= (0b00 << 1*8);
+			GPIOE -> OSPEEDR |= (0b00 << 2*8);
+			GPIOE -> PUPDR |= (0b00 << 2*8);
+
+			GPIOE -> MODER |= (0b10 << 2*10);
+			GPIOE -> OTYPER|= (0b00 << 1*10);
+			GPIOE -> OSPEEDR |= (0b00 << 2*10);
+			GPIOE -> PUPDR |= (0b00 << 2*10);
+
+			GPIOE -> MODER |= (0b10 << 2*11);
+			GPIOE -> OTYPER|= (0b00 << 1*11);
+			GPIOE -> OSPEEDR |= (0b00 << 2*11);
+			GPIOE -> PUPDR |= (0b00 << 2*11);
+
+			GPIOE -> MODER |= (0b10 << 2*11);
+			GPIOE -> OTYPER|= (0b00 << 1*11);
+			GPIOE -> OSPEEDR |= (0b00 << 2*11);
+			GPIOE -> PUPDR |= (0b00 << 2*11);
+
+			GPIOE -> MODER |= (0b10 << 2*12);
+			GPIOE -> OTYPER|= (0b00 << 1*12);
+			GPIOE -> OSPEEDR |= (0b00 << 2*12);
+			GPIOE -> PUPDR |= (0b00 << 2*12);
+
+			GPIOE -> MODER |= (0b10 << 2*13);
+			GPIOE -> OTYPER|= (0b00 << 1*13);
+			GPIOE -> OSPEEDR |= (0b00 << 2*13);
+			GPIOE -> PUPDR |= (0b00 << 2*13);
+
+			GPIOE -> MODER |= (0b10 << 2*14);
+			GPIOE -> OTYPER|= (0b00 << 1*14);
+			GPIOE -> OSPEEDR |= (0b00 << 2*14);
+			GPIOE -> PUPDR |= (0b00 << 2*14);
+
+		//-/ initialization input ADC //-/
+			GPIOA -> MODER |= (0b10 << 2*9);
+
+
+		//-/ Description of specific AF functions for РЕ12-РЕ8 //-/
+			GPIOE -> AFR[1] |= (0b10 << 4*6);
+			GPIOE -> AFR[1] |= (0b10 << 4*5);
+			GPIOE -> AFR[1] |= (0b10 << 4*4);
+			GPIOE -> AFR[1] |= (0b10 << 4*3);
+			GPIOE -> AFR[1] |= (0b10 << 4*2);
+			GPIOE -> AFR[1] |= (0b10 << 4*1);
+			GPIOE -> AFR[1] |= (0b10 << 4*0);
+
+
+		// SPI 1
+			GPIO_InitTypeDef GPIO_InitStruct;
+			GPIO_InitStruct.GPIO_Mode = GPIO_Mode_AF;
+			GPIO_InitStruct.GPIO_Pin = GPIO_Pin_5 | GPIO_Pin_6 | GPIO_Pin_7;
+			GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+			GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+			GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+			GPIO_PinAFConfig(GPIOA, GPIO_PinSource5, GPIO_AF_5);
+			GPIO_PinAFConfig(GPIOA, GPIO_PinSource6, GPIO_AF_5);
+			GPIO_PinAFConfig(GPIOA, GPIO_PinSource7, GPIO_AF_5);
+
+			GPIO_InitStruct.GPIO_Mode = GPIO_Mode_OUT;
+			GPIO_InitStruct.GPIO_Pin = GPIO_Pin_3;
+			GPIO_InitStruct.GPIO_OType = GPIO_OType_PP;
+			GPIO_InitStruct.GPIO_Speed = GPIO_Speed_50MHz;
+			GPIO_Init(GPIOE, &GPIO_InitStruct);
+		}
+		//TIM1 configuration
+		void TIM1_init()
+		{
+		//TIM1 clock ON//
+
+			RCC_APB2PeriphClockCmd(RCC_APB2Periph_TIM1, ENABLE); //тактирование ТС TIM1 (продвинутый)
+
+		///description TIM1///
+
+			TIM1 -> ARR = 1000; 		//adjust the period
+			TIM1 -> PSC = 360; 			//set up the prescaler
+			TIM1 -> CR1 = (0b0 << 4); 	//setting the counting direction B CR1: DIR
+			TIM1 -> CCR1 = 100; 		//setting the value of the active part of the channel from the ARR period
+			TIM1 -> DIER |= (1 << 0); 	//enable generation of interrupts by UEV event
+			TIM1 -> CR1 &= ~(1 << 3); 	//single pulse mode
+
+		///description CH1///
+			TIM1 -> CCMR1 |= (0b00 << 0); 	//setting the output direction of channel 1 (output)
+			TIM1 -> CCMR1 |= (0b1 << 3);	//enable CCR1 buffering in CCMR1: OC1PE = 1
+			TIM1 -> CCMR1 |= (0b110 << 4); 	//we configure the output mode of channel 1 to PWM-1 in CCMR1: OC1M = '110'
+			TIM1 -> CCER |= (0b1 << 0);		//we configure the inclusion of direct channels TIM1 in CCER: CC1E = '1'
+			TIM1 -> CCER |= (0b1 << 2);		//set up the incl. TIM1 channels to CCER: CC1NE = '1'
+			TIM1 -> CCER |= (0b0 << 1); 	//adjust the forward polarity of the TIM1 output in CCEP: CC1P = '0'
+			TIM1 -> CCER |= (0b0 << 3);		//we do the same with complementary input
+
+		///description CH2///
+			TIM1 -> CCMR1 |= (0b00 << 8); 	//setting the output direction of channel 2 (output)
+			TIM1 -> CCMR1 |= (0b1 << 10);	//enable buffering CCR2 in CCMR1: OC2PE = 1
+			TIM1 -> CCMR1 |= (0b110 << 12); //we configure the output mode of channel 1 to PWM-1 in CCMR1: OC2M = '110'
+			TIM1 -> CCER |= (0b1 << 4);		//we configure the inclusion of direct channels TIM1 in CCER: CC2E = '1'
+			TIM1 -> CCER |= (0b1 << 6);		//set up the incl. channels TIM1 to CCER: CC2NE = '1'
+			TIM1 -> CCER |= (0b0 << 5); 	//adjust the forward polarity of the TIM1 output in CCEP: CC2P = '0'
+			TIM1 -> CCER |= (0b0 << 7);		//we do the same with complementary input
+
+		///description CH3///
+			TIM1 -> CCMR2 |= (0b00 << 0); 	//setting the output direction of channel 3 (output)
+			TIM1 -> CCMR2 |= (0b1 << 3);	//enable buffering CCR2 in CCMR2: OC1PE = 1
+			TIM1 -> CCMR2 |= (0b110 << 4); 	//we configure the output mode of channel 1 to PWM-1 in CCMR2: OC1M = '110'
+			TIM1 -> CCER |= (0b1 << 8);		//we configure the inclusion of direct channels TIM1 in CCER: CC3E = '1'
+			TIM1 -> CCER |= (0b1 << 10);	//set up the incl. channels TIM1 to CCER: CC3NE = '1'
+			TIM1 -> CCER |= (0b0 << 9); 	//adjust the forward polarity of the TIM1 output in CCEP: CC3P = '0'
+			TIM1 -> CCER |= (0b0 << 11);	//we do the same with complementary input
+
+		///description CH4///spoiler: it only has a direct channel
+			TIM1 -> CCMR2 |= (0b00 << 8); 	//setting the output direction of channel 4 (output)
+			TIM1 -> CCMR2 |= (0b1 << 10);	//enable buffering CCR2 in CCMR1: OC2PE = 1
+			TIM1 -> CCMR2 |= (0b110 << 12); //we configure the output mode of channel 1 to PWM-1 in CCMR1: OC2M = '110'
+			TIM1 -> CCER |= (0b1 << 12);	//we configure the inclusion of direct channels TIM1 in CCER: CC2E = '1'
+			//incl. set TIM1 channels is not possible due to their absence
+			TIM1 -> CCER |= (0b0 << 13); 	//adjust the forward polarity of the TIM1 output in CCEP: CC2P = '0'
+			//polarity adjustment set TIM1 channels is not possible due to their absence
+
+		///make general settings described below///
+			TIM1 -> BDTR |= (1 << 15); 		//globally allow outputs to work in BDTR: MOE = '1'
+			TIM1 -> EGR |= (1 << 0);		//reload UEV to transfer updated information to active registers
+			TIM1 -> EGR |= (0 << 0);
+
+			TIM1 -> CR1 |= (1 << 0); 		//turn on the timer
+
+		}
+		//Interrupt configuration
+		void NVIC_init()
+		{
+			NVIC_InitTypeDef NVIC_InitStructure;
+
+			NVIC_InitStructure.NVIC_IRQChannel = TIM1_UP_TIM16_IRQn;
+			NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;
+			NVIC_InitStructure.NVIC_IRQChannelSubPriority = 0;
+			NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE;
+			NVIC_Init(&NVIC_InitStructure);
+		}
+		//ADC configuration
+		void ADC_INIT()
+		{
+		RCC -> AHBENR |= RCC_AHBENR_ADC12EN;
+		RCC -> CFGR2 |= RCC_ADC12PLLCLK_Div10;
+		ADC1 -> CR |= 0x00000001;
+		}
+		//SPI configuration
+		void SPI_INIT()
+{
+	 RCC -> APB2ENR |= RCC_APB2ENR_SPI1EN;	//мы активировали
+
+	 SPI1 -> CR1 |= (uint16_t)(1 << 1);		//-----СLK in 1 while waiting
+	 SPI1 -> CR1 |= (uint16_t)(1 << 0);		//second transition of the clock signal = capture of information
+	 SPI1 -> CR1 |= (uint16_t)(0b000 << 3); //dividing the system bus frequency by 8 CR1: BR
+	 SPI1 -> CR1 |= (uint16_t)(1 << 9);		//software control SSN enabled CR1: SSM
+	 SPI1 -> CR1 |= (uint16_t)(1 << 8);		//-----SSI
+	 SPI1 -> CR2 |= (0b0111 << 8);          //set transfer size = 8
+	 SPI1 -> CR1 |= (uint16_t)(1 << 2);     //-----MASTER mode
+
+	 SPI1 -> CR1 |= (1 << 6); 				//SPI ON CR1: SPE
+
+	 SPI_RxFIFOThresholdConfig(SPI1, SPI_RxFIFOThreshold_QF);
+}
+
+
+//slave-commands block
+		//clear CCERx of TIM1
+		void CCER_DELITE()
+		{
+			TIM1-> CCER &= ~0xffff;
+		}
+
+		//data SPI transmission unit
+		uint8_t sendByte(uint8_t byteToSend)
+		{
+			while ( ((SPI1 -> SR) & (1 << 1)) == RESET){}
+			//SPI_SendData8(SPI1, byteToSend);
+			uint32_t spixbase = 0x00;
+
+			spixbase = (uint32_t)SPI1;
+			spixbase += 0x0C;
+			*(uint8_t *) spixbase = byteToSend;//Явное переопределение типа указателя
+
+			while ( ((SPI1 -> SR) & (1 << 0)) == RESET){}
+
+			return *(uint8_t*) spixbase;
+		}
+		void writeData(uint8_t address, uint8_t dataToWrite)
+		{
+			GPIOE -> ODR &= ~(1 << 3);
+			sendByte(address);
+			sendByte(dataToWrite);
+			GPIOE -> ODR |= (1 << 3);
+		}
+
+		//data ADC transmission unit
+		unsigned int readADC(uint8_t channel)
+		{
+		ADC_RegularChannelConfig(ADC1,channel, 1,ADC_SampleTime_7Cycles5);
+
+		ADC1 -> CR |= 0x00000004;			//ON Inj. channel
+		return ADC1 -> DR;
+		}
+		//functions for delay
+		void _delay(uint32_t i)
+		{
+			count = 0;
+			while(1)
+			{
+				if(count == i) return ;
+			}
+		}
+
+
+
+//main unit
+		//for configuration SYSCLOCK
+		void SYSCLCK_INIT()
+		{
+			RCC_ClocksTypeDef RCC_Clock;
+			RCC_GetClocksFreq(&RCC_Clock);
+			SysTick_Config(RCC_Clock.HCLK_Frequency / 1000); //mS
+		}
+		//for 2 blink-delay
+		void main_mezo_wait_settens()
+				{
+				//Blink №1
+				_delay(500);
+				GPIOE -> ODR |= (1 << 15);
+				_delay(500);
+				GPIOE -> ODR &= ~(1 << 15);
+				//Blink №2
+				_delay(500);
+				GPIOE -> ODR |= (1 << 15);
+				_delay(500);
+				GPIOE -> ODR &= ~(1 << 15);
+				_delay(500);
+				}
+		//change one in 5 sensitivity mode of gyroscope
+		void main_settens1()
+		{
+		while(1)
+		{
+			PrescalerFROM1settens = readADC(ADC_Channel_1);
+			if((PrescalerFROM1settens<4095) && (PrescalerFROM1settens>3501))  	 GPIOE -> ODR |= (1 << 12);
+			if((PrescalerFROM1settens<3500) && (PrescalerFROM1settens>3000))  	 GPIOE -> ODR |= (1 << 11);
+			if((PrescalerFROM1settens<3000) && (PrescalerFROM1settens>2000))  	 GPIOE -> ODR |= (1 << 10);
+			if((PrescalerFROM1settens<2000) && (PrescalerFROM1settens>1000))  	 GPIOE -> ODR |= (1 << 9);
+			if((PrescalerFROM1settens<1000) && (PrescalerFROM1settens>=0))		GPIOE -> ODR |= (1 << 8);
+
+			for(int i = 8; i<=13; i++) GPIOE -> ODR &= ~(1 << i);
+
+			uint8_t ost = PrescalerFROM1settens%1000;
+			PrescalerFROM1settens = (PrescalerFROM1settens-ost)/1000; //4000, 3000, 2000, 1000, 0000
+
+			if((GPIOA -> IDR & (1<<1)))
+				{
+				_delay(100);
+
+				if((GPIOA -> IDR & (1<<1)))
+				{
+					return ;
+				}
+				}
+		}
+
+		}
+		//change one axis: oY or oX
+		void main_settens2()
+		{
+			while(1)
+			{
+				uint16_t cange = readADC(ADC_Channel_1);
+				if((cange<4095) && (cange>2047))
+					{
+					GPIOE -> ODR |= (1 << 9);
+					AXIS = Y;
+					}
+				if((cange<2046) && (cange>=0000))
+					{
+					GPIOE -> ODR |= (1 << 8);
+					AXIS = X;
+					}
+
+				for(int i = 8; i<=9; i++) GPIOE -> ODR &= ~(1 << i);
+
+				if((GPIOA -> IDR & (1<<1)))
+					{
+					_delay(100);
+
+					if((GPIOA -> IDR & (1<<1)))
+					{
+						return ;
+
+					}
+					}
+			}
+		}
+		//change one output mode: PWM or digital output
+		void main_settens3()
+				{
+					while(1)
+					{
+						uint16_t cange = readADC(ADC_Channel_1);
+						if((cange<4095) && (cange>2047))
+							{
+							GPIOE -> ODR |= (1 << 9);
+							OUT_MODE = PWM;
+							}
+						if((cange<2046) && (cange>=0000))
+							{
+							GPIOE -> ODR |= (1 << 8);
+							OUT_MODE = DIGITAL;
+							}
+
+						for(int i = 8; i<=9; i++) GPIOE -> ODR &= ~(1 << i);
+
+						if((GPIOA -> IDR & (1<<1)))
+							{
+							_delay(100);
+
+							if((GPIOA -> IDR & (1<<1)))
+							{
+								return ;
+
+							}
+							}
+					}
+				}
+		//set potentiometer in center status
+		void main_post_settens()
+		{
+		while(1)
+			{
+			uint16_t resultOUT_ADC;
+
+			resultOUT_ADC = readADC(ADC_Channel_1);
+
+			if((resultOUT_ADC>1997) && (resultOUT_ADC<2097)) //get ADC output value in the range 2047±50 (half of 4095)
+				{
+					return ;
+				}
+
+			if((resultOUT_ADC<4095) && (resultOUT_ADC>3512))  		 GPIOE -> ODR |= (1 << 13);
+			if((resultOUT_ADC<3512) && (resultOUT_ADC>2097))  	 GPIOE -> ODR |= (1 << 12);
+			if((resultOUT_ADC<2097) && (resultOUT_ADC>1997))  	 GPIOE -> ODR |= (1 << 11);
+			if((resultOUT_ADC<1996) && (resultOUT_ADC>1065))  	 GPIOE -> ODR |= (1 << 10);
+			if((resultOUT_ADC<1065) && (resultOUT_ADC>682))  	 GPIOE -> ODR |= (1 << 9);
+			if((resultOUT_ADC<682) && (resultOUT_ADC>=0))		 GPIOE -> ODR |= (1 << 8);
+			for(int i = 8; i<=13; i++) GPIOE -> ODR &= ~(1 << i);
+			}
+		}
+		//Blink of PE15 for complete settens
+		void main_post_wait_settens()
+		{
+		//Blink №1
+		_delay(500);
+		GPIOE -> ODR |= (1 << 15);
+		_delay(500);
+		GPIOE -> ODR &= ~(1 << 15);
+		//Blink №2
+		_delay(500);
+		GPIOE -> ODR |= (1 << 15);
+		_delay(500);
+		GPIOE -> ODR &= ~(1 << 15);
+		//Blink №3
+		_delay(500);
+		GPIOE -> ODR |= (1 << 15);
+		_delay(500);
+		GPIOE -> ODR &= ~(1 << 15);
+		//mission complete
+		_delay(500);
+		GPIOE -> ODR |= (1 << 15);
+		}
+		//counter for delay
+		void SysTick_Handler (void)
+		{
+			count++;
+		}
+		//main cycle in this program
+		void TIM1_UP_TIM16_IRQHandler()
+{	//@main_cycle
+	//angle hiro
+			GPIO_ResetBits(GPIOE, GPIO_Pin_3);
+			sendByte(0xE8);
+			receiveData_x[0] = sendByte(0x00);
+			receiveData_x[1] = sendByte(0x00);
+
+
+			receiveData_y[0] = sendByte(0x00);
+			receiveData_y[1] = sendByte(0x00);
+
+			GPIO_SetBits(GPIOE, GPIO_Pin_3);
+
+
+
+//DATA PROCESSING AND PREPARATION FOR OUTPUT
+
+	//-/BEGIN comeback from Set№2/-//
+
+	//-/BEGIN comeback from Set№3/-//
+	if(OUT_MODE == PWM) AXIS = Y; //if OUT_MODE set as PWM, we need value from two axis, which means
+	//-/END comeback from Set№3/-//
+
+	if(AXIS == Y)
+	{
+				yResult = (receiveData_y[0] | (receiveData_y[1] << 8)) - 10;	// 10 -unique parameter                                                          @DIGTAL_OUT_MODE_Y-axis
+				if ((yResult & 0x8000) == 0){ySign = 0;}
+					else
+					{
+						ySign = 1;
+						yResult &= 0x7FFF;
+						yResult = 0x8000 - yResult;
+					}
+					if (yResult < 0x20){yResult = 0;}
+
+				//-/BEGIN comeback from Set№1/-//
+					yResult = yResult * PrescalerFROM1settens;
+				//-/END comeback from Set№1/-//
+
+					if (ySign == 0){yPosition += 0.07 * yResult * 0.025;}//~    0  ... 150
+					else{yPosition -= 0.07 * yResult * 0.025;}			 //~  -150 ...  0
+
+					if(OUT_MODE == DIGITAL)
+					{
+					if(yPosition<-150)yPosition=-150;//ограничиваем диапазон.
+					if(yPosition>150)yPosition=150;
+
+
+				//-/adjustment ADC/-//
+					resultADC = readADC(ADC_Channel_1);
+
+					Set0inACTfromADC = resultADC/3;//1365max
+					if (Set0inACTfromADC<=682)
+					{
+						Set0inACTfromADC = (682-Set0inACTfromADC);
+						Set0inACTfromADC = (-1)*Set0inACTfromADC;
+					}
+					else Set0inACTfromADC = Set0inACTfromADC-682;
+					Set0inACTfromADC += 1500;
+
+					result_from_HIR_y = Set0inACTfromADC + ((yPosition)*27);
+					}
+	}
+
+	//-/BEGIN comeback from Set№3/-//
+	if(OUT_MODE == PWM) AXIS = X; //if OUT_MODE set as PWM, we need value from two axis, which means
+	//-/END comeback from Set№3/-//
+
+	if(AXIS == X)
+	{
+				xResult = (receiveData_x[0] | (receiveData_x[1] << 8)) - 10;  // 10 -unique parameter                                                            @DIGTAL_OUT_MODE_X-axis
+
+				if ((xResult & 0x8000) == 0){xSign = 0;}
+				else
+				{
+					xSign = 1;
+					xResult &= 0x7FFF;
+					xResult = 0x8000 - xResult;
+				}
+				if (xResult < 0x20){xResult = 0;}
+
+			//-/BEGIN comeback from Set№1/-//
+				xResult = xResult * PrescalerFROM1settens;
+			//-/END comeback from Set№1/-//
+
+				if (xSign == 0){xPosition += 0.07 * xResult * 0.025;}//~    0  ... 150
+				else{xPosition -= 0.07 * xResult * 0.025;}			 //~  -150 ...  0
+
+				if(OUT_MODE == DIGITAL)
+				{
+				if(xPosition<-150)xPosition=-150;//limit the range.
+				if(xPosition>150)xPosition=150;
+
+
+			//-/adjustment ADC/-//
+				resultADC = readADC(ADC_Channel_1);
+
+				Set0inACTfromADC = resultADC/3;//1365max
+				if (Set0inACTfromADC<=682)
+				{
+					Set0inACTfromADC = (682-Set0inACTfromADC);
+					Set0inACTfromADC = (-1)*Set0inACTfromADC;
+				}
+				else Set0inACTfromADC = Set0inACTfromADC-682;
+				Set0inACTfromADC += 1500;
+
+				result_from_HIR_x = Set0inACTfromADC + ((xPosition)*27);
+				}
+	}
+	//-/END comeback from Set№2/-//
+
+
+
+CCER_DELITE();
+
+if(OUT_MODE == DIGITAL)
+	{
+						if(AXIS == X) result_from_HIR = result_from_HIR_x;
+						else result_from_HIR = result_from_HIR_y;
+
+
+						if (result_from_HIR < 500)
+							{
+							int result_from_0_to_500 =  result_from_HIR*2;
+
+							TIM1 -> CCER |= (1<<0); //ON РЕ9
+							TIM1 -> CCER |= (1<<2); //ON РЕ8
+
+							TIM1 -> CCR1 = result_from_0_to_500; //upload the processed value from the ADC to the shim register
+							}
+						else
+							{
+						/// second gap between PE9 and PE10 ///
+							if (result_from_HIR < 1000)
+								{
+								int result_from_500_to_1000_for_CCR1 = (1000 - result_from_HIR)*2;
+
+								TIM1 -> CCER |= (1<<0); //ON РЕ9
+								TIM1 -> CCER |= (1<<6); //ON РЕ10
+
+								TIM1 -> CCR1 = result_from_500_to_1000_for_CCR1; //upload the processed value from the ADC to the shim register
+								TIM1 -> CCR2 = (result_from_HIR - 500)*2; //
+								}
+							else
+								{
+						///third gap between PE10 and PE11///
+								if (result_from_HIR < 1533)
+									{
+									int result_from_1000_to_1500_for_CCR2 = 1000- ((1500 - result_from_HIR)*2);
+									//since the channel we are switching to is direct, we need an inverter. value, cat. lights it up
+									//so that it starts to glow when passing to this interval, and not go out
+									int result2_invert_from_1000_to_1500_for_CCR2 = 1000 - result_from_1000_to_1500_for_CCR2;
+									TIM1 -> CCER |= (1<<6); //ON РЕ10
+									TIM1 -> CCER |= (1<<4); //ON РЕ11
+
+									TIM1 -> CCR2 = result_from_1000_to_1500_for_CCR2; //upload the processed value from the ADC to the shim register
+
+									}
+								else
+									{
+						/// fourth gap between PE11 and PE12///
+									if (result_from_HIR < 2044)
+										{
+										int result_from_1500_to_2044_for_CCR2 = (2044 - result_from_HIR)*2;
+										int result_from_1500_to_2044_for_CCR3 = 1000 - result_from_1500_to_2044_for_CCR2;
+										if (result_from_1500_to_2044_for_CCR3 < 20) result_from_1500_to_2044_for_CCR3=0;//для повышения стабильности
+										TIM1 -> CCER |= (1<<4); //ON РЕ11
+										TIM1 -> CCER |= (1<<10); //ON РЕ12
+
+										TIM1 -> CCR2 = result_from_1500_to_2044_for_CCR2; //upload the processed value from the ADC to the shim register
+										TIM1 -> CCR3 = result_from_1500_to_2044_for_CCR3;
+										}
+									else
+										{
+						/// fifth gap between PE12 and PE13 ///
+											if (result_from_HIR < 2555)
+												{
+												int result_from_2000_to_2555_for_CCR3 = 1000- ((2555 - result_from_HIR)*2);
+												//since the channel we are switching to is direct, we need an inverter. value, cat. lights it up
+												//so that it starts to glow when passing to this interval, and not go out
+
+												TIM1 -> CCER |= (1<<10); //ON РЕ12
+												TIM1 -> CCER |= (1<<8); //ON РЕ13
+
+												TIM1 -> CCR3 = result_from_2000_to_2555_for_CCR3; //upload the processed value from the ADC to the shim register
+												}
+											else
+												{
+						/// sixth gap between PE13 and PE14 ///
+													if (result_from_HIR < 3066)
+														{
+														int result_from_1500_to_2044_for_CCR3 = (3066 - result_from_HIR)*2;
+														int result_from_1500_to_2044_for_CCR4 = 1000 - result_from_1500_to_2044_for_CCR3;
+														if (result_from_1500_to_2044_for_CCR4 < 20) result_from_1500_to_2044_for_CCR4=0;//to improve stability
+														TIM1 -> CCER |= (1<<8); //ON РЕ13
+														TIM1 -> CCER |= (1<<12); //ON РЕ14
+
+														TIM1 -> CCR3 = result_from_1500_to_2044_for_CCR3; //upload the processed value from the ADC to the shim register
+														TIM1 -> CCR4 = result_from_1500_to_2044_for_CCR4;
+														}
+													else
+														{
+														if (result_from_HIR < 4095)
+																			{
+																			int result_from_1500_to_2044_for_CCR4 = (4095 - result_from_HIR)*2;
+																			int result_from_1500_to_2044_for_CCR1 = 1000-result_from_1500_to_2044_for_CCR4;
+																			if (result_from_1500_to_2044_for_CCR1 < 20) result_from_1500_to_2044_for_CCR1=0;//to improve stability
+																			TIM1 -> CCER |= (1<<12); //ON РЕ14
+																			TIM1 -> CCER |= (1<<2); //ON РЕ8
+
+																			 //upload the processed value from the ADC to the shim register
+																			TIM1 -> CCR4 = result_from_1500_to_2044_for_CCR4;
+																			TIM1 -> CCR1 = result_from_1500_to_2044_for_CCR1;
+																			}
+														}
+											}
+										}
+									}
+								}
+							}
+	}
+
+
+	if(OUT_MODE == PWM)
+	{	//using variable in this unit
+		//result_from_HIR_x
+		//result_from_HIR_y
+		//PWM_Set0Flag
+		//Set0_ofX_inACT_PWMmode_fromADC;
+		//Set0_ofY_inACT_PWMmode_fromADC;
+
+		//-/adjustment ADC/-//
+				Set0_ofX_inACT_PWMmode_fromADC = readADC(ADC_Channel_1);
+
+		   	    Set0_ofX_inACT_PWMmode_fromADC = Set0_ofX_inACT_PWMmode_fromADC/3;//1365max
+				if (Set0_ofX_inACT_PWMmode_fromADC<=682)//"-"
+				{
+					Set0_ofX_inACT_PWMmode_fromADC = (682-Set0_ofX_inACT_PWMmode_fromADC);
+					Set0_ofX_inACT_PWMmode_fromADC = (-1)*Set0_ofX_inACT_PWMmode_fromADC;
+				}
+				if (Set0_ofX_inACT_PWMmode_fromADC>2047) //"+"
+				{
+					Set0_ofX_inACT_PWMmode_fromADC = Set0_ofX_inACT_PWMmode_fromADC-670;
+				}
+																																								
+				//2500- unique stabilization parameter that is selected depending on the active LED at rest 													@PWM_OUT_MODE_X-axis
+				result_from_HIR_x = (Set0_ofX_inACT_PWMmode_fromADC*2) + 1300 + ((xPosition)*27);
+
+				//2500- unique stabilization parameter that is selected depending on the active LED at rest 													@PWM_OUT_MODE_Y-axis
+				result_from_HIR_y = Set0_ofY_inACT_PWMmode_fromADC + 2500 + ((yPosition)*27);
+
+
+
+		if (PWM_Set0Flag = NONE_AXIS_FLAG)
+		{
+			GPIOE -> MODER |= (0b01 << 2*15);
+			GPIOE -> ODR |= (1 << 15);
+		}
+
+		//preparating X-value
+
+		if ((result_from_HIR_x > 2050) && (result_from_HIR_x < 6000))
+		{
+			TIM1 -> CCER |= (1<<0); //ON РЕ9
+			TIM1 -> CCR1 = (result_from_HIR_x - 2047)/2;
+		}
+		if ((result_from_HIR_x >= 2000) && (result_from_HIR_x <= 2050)){}
+		if ((result_from_HIR_x >= 0) && (result_from_HIR_x < 2000))
+		{
+			TIM1 -> CCER |= (1<<8); //ON РЕ13
+			TIM1 -> CCR3 = (-1)*((result_from_HIR_x-2047)/2);
+		}
+
+		//preparating Y-value
+		if ((result_from_HIR_y > 2047) && (result_from_HIR_y < 4095))
+		{
+			TIM1 -> CCER |= (1<<4); //ON РЕ11
+			TIM1 -> CCR2 = (result_from_HIR_y - 2047)/2;
+		}
+	}
+
+
+	//if was  changed NONE SET MODE, we need clear him effects
+	GPIOE -> MODER &= ~(0b01 << 15);
+	GPIOE -> ODR &= ~(1 << 15);
+
+	TIM1 -> SR &= ~(1<<0);//clear flag call interrupt SR:UIF = '0'
+}
+
+
+void main()
+{
+			//configuration of SYS TIM for delay
+			SYSCLCK_INIT();
+
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+
+	//settens of sensity
+			ADC_INIT();
+			GPIO_SET1_INIT();
+			main_settens1();
+			GPIO_RESET1_INIT();
+
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+
+			//potentiometer in ready state
+			GPIO_SET1_INIT();
+			main_post_settens();
+			GPIO_RESET1_INIT();
+
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+	//settens of output mode
+			GPIO_SET2_INIT();
+			main_settens3();
+			GPIO_RESET2_INIT();
+
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+
+			//potentiometer in ready state
+			GPIO_SET1_INIT();
+			main_post_settens();
+			GPIO_RESET1_INIT();
+
+if (OUT_MODE == DIGITAL)
+{
+	//settens of axis
+			GPIO_SET2_INIT();
+			main_settens2();
+			GPIO_RESET2_INIT();
+
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+
+			//potentiometer in ready state
+			GPIO_SET1_INIT();
+			main_post_settens();
+			GPIO_RESET1_INIT();
+}
+
+
+	//wait for long ready of human operator (3 blink)
+			GPIO_post_wait_settens();
+			main_post_wait_settens();
+			GPIO_reset_post_wait_settens();
+
+	//training of the main cycle @main_set
+			GPIO_init();
+			NVIC_init();
+			SPI_INIT();
+			TIM1_init();
+
+			//clear CCERmap for fix bug
+			CCER_DELITE();
+
+
+			//activated HIRO
+
+			//change activity axis
+			writeData(0x20, 0b00001011);
+
+			//change sensitivity in gyro.
+			writeData(0x23, 0x30);
+	while(1)
+	{
+
+	}
+}
+
