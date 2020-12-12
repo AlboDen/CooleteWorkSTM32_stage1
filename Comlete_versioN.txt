@@ -947,6 +947,11 @@ void main()
 			main_post_settens();
 			GPIO_RESET1_INIT();
 
+			//wait for fast ready of human operator (2 blink)
+			GPIO_post_wait_settens();
+			main_mezo_wait_settens();
+			GPIO_reset_post_wait_settens();
+			
 if (OUT_MODE == DIGITAL)
 {
 	//settens of axis
